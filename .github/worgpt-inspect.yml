@@ -1,0 +1,31 @@
+
+name: Inspect GPT Launcher source
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'GPT-Launcher-ARM64-Cloud-Build.zip'
+      - '.github/workflows/inspect-source.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Inspect source archive
+        run: |
+          set -euo pipefail
+          unzip -t GPT-Launcher-ARM64-Cloud-Build.zip
+          mkdir extracted
+          unzip -q GPT-Launcher-ARM64-Cloud-Build.zip -d extracted
+          echo "=== FILE TREE ==="
+          find extracted -maxdepth 6 -type f | sort
+          echo "=== BUILD FILES ==="
+          find extracted -type f | grep -E '(^|/)(gradlew|settings.gradle|settings.gradle.kts|build.gradle|build.gradle.kts|Cargo.toml|AndroidManifest.xml)$' || true
+          

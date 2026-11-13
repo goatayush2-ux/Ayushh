@@ -1,4 +1,9 @@
-
+      - name: Export Mojo source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mojo-Source-Inspection
+          path: source/
+          compression-level: 6
 name: Build GPT Launcher APK
 
 on:

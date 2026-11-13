@@ -1,4 +1,5 @@
 
+
 name: Inspect GPT Launcher source
 
 on:
@@ -14,32 +15,57 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Inspect actual Mojo source
+      - name: Extract Mojo source
         run: |
           set -euo pipefail
-          unzip -t MojoLauncher-3_openjdk.zip.zip
-          mkdir extracted
+          mkdir -p extracted
           unzip -q MojoLauncher-3_openjdk.zip.zip -d extracted
 
-          echo "=== SOURCE FILES ==="
+      - name: Export renderer and input source
+        run: |
+          set -euo pipefail
+          mkdir -p source-review
+
+          find extracted -type f \
+            \( -name '*.java' -o -name '*.kt' \
+            -o -name '*.cpp' -o -name '*.h' \
+            -o -name '*.xml' -o -name '*.gradle' \) \
+            | grep -Ei 'renderer|render|input|mouse|motion|gameactivity|strings.xml|AndroidManifest.xml|build.gradle' \
+            | while IFS= read -r file; do
+                dest="source-review/${file#extracted/}"
+                mkdir -p "$(dirname "$dest")"
+                cp "$file" "$dest"
+              done
+
+      - name: Export native libraries
+        run: |
+          set -euo pipefail
+          mkdir -p native-review
+          find extracted -type f -name '*.so' \
+            -exec cp --parents {} native-review/ \;
+
+      - name: Create source report
+        run: |
+          set -euo pipefail
           find extracted -type f | sort > source-files.txt
-          head -n 500 source-files.txt
+          grep -RniE 'GL4ES|ANGLE|Zink|sensitivity|MotionEvent|mouse' \
+            source-review \
+            > renderer-input-report.txt || true
 
-          echo "=== RENDERER AND INPUT REFERENCES ==="
-          grep -RniE 'GL4ES|ANGLE|Zink|mouseSensitivity|sensitivity|onGenericMotion|MotionEvent' extracted \
-            --include='*.java' --include='*.kt' --include='*.cpp' \
-            --include='*.h' --include='*.xml' \
-            > inspection-report.txt || true
-
-      - name: Upload inspection report
+      - name: Upload source review
         uses: actions/upload-artifact@v4
         with:
-          name: GPT-Launcher-Source-Inspection
+          name: GPT-Launcher-Renderer-Review
           path: |
+            source-review/
+            native-review/
             source-files.txt
-            inspection-report.txt
-            
+            renderer-input-report.txt
+          if-no-files-found: error
+          compression-level: 6

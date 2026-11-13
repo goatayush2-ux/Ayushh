@@ -34,6 +34,7 @@ jobs:
           test -f "$ROOT/.gitmodules"
           echo "MOJO_ROOT=$GITHUB_WORKSPACE/$ROOT" >> "$GITHUB_ENV"
 
+  
       - name: Fetch native dependencies
         run: |
           set -euo pipefail
@@ -46,9 +47,21 @@ jobs:
 
           JNI_DIR="$MOJO_ROOT/app_mojo/src/main/jni"
           mkdir -p "$JNI_DIR"
+
+          # Remove placeholder folders before creating links
+          rm -rf "$JNI_DIR/glfw"
+          rm -rf "$JNI_DIR/mojoexec"
+          rm -rf "$JNI_DIR/sdl"
+
           ln -s "$MOJO_ROOT/glfw" "$JNI_DIR/glfw"
           ln -s "$MOJO_ROOT/mojoexec" "$JNI_DIR/mojoexec"
           ln -s "$MOJO_ROOT/sdl" "$JNI_DIR/sdl"
+
+          # Verify all dependencies
+          test -f "$JNI_DIR/glfw/CMakeLists.txt"
+          test -f "$JNI_DIR/mojoexec/CMakeLists.txt"
+          test -f "$JNI_DIR/sdl/CMakeLists.txt"
+          
 
       - name: Prepare Git metadata
         run: |

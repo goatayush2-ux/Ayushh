@@ -12,58 +12,141 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract Mojo source
+        shell: bash
         run: |
-          unzip -q MojoLauncher-3_openjdk.zip -d source
-          ROOT="$(find source -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-          echo "MOJO_ROOT=$ROOT" >> "$GITHUB_ENV"
-          test -f "$ROOT/settings.gradle"
-          test -f "$ROOT/gradlew"
+          set -euo pipefail
 
-      - name: Fetch native dependencies
-        run: |
-          cd "$MOJO_ROOT"
-          git clone --depth 1 https://github.com/MojoLauncher/glfw glfw
-          git clone --depth 1 https://github.com/MojoLauncher/mojoexec mojoexec
-          git clone --depth 1 https://github.com/MojoLauncher/MojoSDL sdl
-          git clone --depth 1 https://github.com/MojoLauncher/NoBlocklist NoBlocklist
+          mkdir -p source
+          unzip -q MojoLauncher-3_openjdk.zip -d source
+
+          SETTINGS_FILE="$(find source -type f -name settings.gradle -print -quit)"
+          test -n "$SETTINGS_FILE"
+
+          ROOT="$(dirname "$SETTINGS_FILE")"
+
+          test -f "$ROOT/gradlew"
+          test -f "$ROOT/.gitmodules"
+          test -f "$ROOT/app_mojo/src/main/jni/CMakeLists.txt"
+
+          echo "MOJO_ROOT=$GITHUB_WORKSPACE/$ROOT" >> "$GITHUB_ENV"
 
       - name: Prepare Git metadata
+        shell: bash
         run: |
+          set -euo pipefail
           cd "$MOJO_ROOT"
-          git init
+
+          git init -b ci-build
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add -A
-          git commit -m "Prepare Android build"
 
-      - name: Set up Java
+          git add -A
+          git commit -m "Prepare Mojo source for Android build"
+
+      - name: Fetch pinned native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$MOJO_ROOT"
+
+          clone_pinned() {
+            git clone --depth 1 --filter=blob:none --no-checkout "$1" "$2"
+            git -C "$2" fetch --depth 1 origin "$3"
+            git -C "$2" checkout --detach FETCH_HEAD
+          }
+
+          clone_pinned \
+            https://github.com/MojoLauncher/glfw \
+            glfw \
+            7a6c6ceb51f20cd0db84dec2914ac1a0237051f6
+
+          clone_pinned \
+            https://github.com/MojoLauncher/mojoexec \
+            mojoexec \
+            9ec4b836e93900135bad823eaac16ebc81cf6b98
+
+          clone_pinned \
+            https://github.com/MojoLauncher/MojoSDL \
+            sdl \
+            c63845bd49c5a7667d1de0f6134f85ed1ccc8889
+
+          clone_pinned \
+            https://github.com/MojoLauncher/NoBlocklist \
+            NoBlocklist \
+            f4209d4755d6af6a19fedbe578313e29ebfc45ff
+
+          JNI_DIR="$MOJO_ROOT/app_mojo/src/main/jni"
+          mkdir -p "$JNI_DIR"
+
+          rm -rf "$JNI_DIR/glfw" "$JNI_DIR/mojoexec" "$JNI_DIR/sdl"
+
+          ln -s "$MOJO_ROOT/glfw" "$JNI_DIR/glfw"
+          ln -s "$MOJO_ROOT/mojoexec" "$JNI_DIR/mojoexec"
+          ln -s "$MOJO_ROOT/sdl" "$JNI_DIR/sdl"
+
+          test -f "$JNI_DIR/glfw/CMakeLists.txt"
+          test -f "$JNI_DIR/mojoexec/CMakeLists.txt"
+          test -f "$JNI_DIR/sdl/CMakeLists.txt"
+          test -f "$MOJO_ROOT/NoBlocklist/build.gradle"
+
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK components
-        run: |
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | sort | tail -n 1)"
-          yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Build APK
+      - name: Install Android SDK components
+        shell: bash
         run: |
+          set -euo pipefail
+
+          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$ANDROID_SDK"
+
+          SDKMANAGER="$(find "$ANDROID_SDK/cmdline-tools" \
+            -type f -name sdkmanager | sort | tail -n 1)"
+
+          test -n "$SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865" \
+            "cmake;3.22.1"
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
           cd "$MOJO_ROOT"
+
           chmod +x gradlew
-          ./gradlew --no-daemon :app_mojo:assembleFullDebug
+
+          ./gradlew --no-daemon --stacktrace \
+            :app_mojo:assembleFullDebug
+
+          mkdir -p "$GITHUB_WORKSPACE/out"
+
+          cp app_mojo/build/outputs/apk/full/debug/app_mojo-full-debug.apk \
+            "$GITHUB_WORKSPACE/out/GPT-Launcher.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GPT-Launcher-APK
-          path: ${{ env.MOJO_ROOT }}/app_mojo/build/outputs/apk/full/debug/*.apk
+          path: out/GPT-Launcher.apk
           if-no-files-found: error
+          

@@ -1,0 +1,73 @@
+name: Build GPT Launcher APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'MojoLauncher-3_openjdk.zip'
+      - '.github/workflows/build-mojo-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract Mojo source
+        run: |
+          unzip -q MojoLauncher-3_openjdk.zip -d source
+          ROOT="$(find source -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          echo "MOJO_ROOT=$ROOT" >> "$GITHUB_ENV"
+          test -f "$ROOT/settings.gradle"
+          test -f "$ROOT/gradlew"
+
+      - name: Fetch native dependencies
+        run: |
+          cd "$MOJO_ROOT"
+          git clone --depth 1 https://github.com/MojoLauncher/glfw glfw
+          git clone --depth 1 https://github.com/MojoLauncher/mojoexec mojoexec
+          git clone --depth 1 https://github.com/MojoLauncher/MojoSDL sdl
+          git clone --depth 1 https://github.com/MojoLauncher/NoBlocklist NoBlocklist
+
+      - name: Prepare Git metadata
+        run: |
+          cd "$MOJO_ROOT"
+          git init
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Prepare Android build"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android components
+        run: |
+          sdkmanager "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865" \
+            "cmake;3.22.1"
+
+      - name: Build APK
+        run: |
+          cd "$MOJO_ROOT"
+          chmod +x gradlew
+          ./gradlew --no-daemon :app_mojo:assembleFullDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPT-Launcher-APK
+          path: ${{ env.MOJO_ROOT }}/app_mojo/build/outputs/apk/full/debug/*.apk
+          if-no-files-found: error
